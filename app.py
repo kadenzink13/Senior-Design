@@ -130,7 +130,19 @@ def display_chip_data():
 
         </style>
         <script>
+            let dropdownOpen = false;
+            function updateStatus(uid, status) {
+                fetch(`/update_status/${uid}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `status=${encodeURIComponent(status)}`
+                });
+            }
+
             function fetchChipData() {
+                if (dropdownOpen) return;
                 fetch('/api/data')
                     .then(response => response.json())
                     .then(response => {
@@ -151,10 +163,25 @@ def display_chip_data():
                                     <td>${chip.TB || ''}</td>
                                     <td>${chip.TR || ''}</td>
                                     <td>${chip.DR || ''}</td>
+                                    <td>
+                                        <select class="status-dropdown" onchange="updateStatus('${chip.UID}', this.value)">
+                                            ${["Received", "In Progress", "On Hold", "Report", "Complete"].map(status =>
+                                                `<option value="${status}" ${chip.Status === status ? "selected" : ""}>${status}</option>`
+                                            ).join("")}
+                                        </select>
+                                    </td>
                                     <td><button class="archive-btn" onclick="archiveSample('${chip.UID}')">Archive</button></td>
+
                                 </tr>
                             `;
                             tableBody.innerHTML += row;
+                        });
+
+                        document.querySelectorAll('select.status-dropdown').forEach(select => {
+                            select.addEventListener('focus', () => { dropdownOpen = true; });
+                            select.addEventListener('blur', () => {
+                                setTimeout(() => { dropdownOpen = false; }, 200);  // slight delay to allow clicking
+                            });
                         });
 
                         if (activeUID) {
@@ -233,6 +260,7 @@ def display_chip_data():
                             <th>Tested By</th>
                             <th>Tests Run</th>
                             <th>Date Received</th>
+                            <th>Status</th>
                             <th>Archive</th>
                         </tr>
                     </thead>
@@ -264,6 +292,25 @@ def display_chip_data():
     </html>
     """
     return render_template_string(html_content)
+
+@app.route('/update_status/<uid>', methods=['POST'])
+def update_status(uid):
+    new_status = request.form.get('status')
+    updated_rows = []
+
+    with open(CHIP_DATA_FILE, 'r') as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            if row['UID'] == uid:
+                row['Status'] = new_status
+            updated_rows.append(row)
+
+    with open(CHIP_DATA_FILE, 'w', newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=updated_rows[0].keys())
+        writer.writeheader()
+        writer.writerows(updated_rows)
+
+    return '', 204
 
 
 @app.route('/api/data')
@@ -397,7 +444,8 @@ def add_chip_data():
             "SB": form_data["SB"],
             "TB": form_data["TB"],
             "TR": form_data["TR"],
-            "DR": datetime.datetime.now().strftime("%B %d, %Y %I:%M %p")
+            "DR": datetime.datetime.now().strftime("%B %d, %Y %I:%M %p"),
+            "Status": "Received"
         }
 
         file_exists = os.path.exists(CHIP_DATA_FILE)
